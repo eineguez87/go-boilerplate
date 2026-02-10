@@ -4,14 +4,14 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"go-boilerplate/internal/auth"
 )
 
 type Handler struct {
-	DB        *pgxpool.Pool
-	JWTSecret string
+	service Service
+}
+
+func NewHandler(service Service) *Handler {
+	return &Handler{service: service}
 }
 
 func (h *Handler) Register(c *gin.Context) {
@@ -25,15 +25,8 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	hash, _ := auth.HashPassword(req.Password)
-
-	_, err := h.DB.Exec(c, `
-INSERT INTO users (email, password_hash)
-VALUES ($1, $2)
-`, req.Email, hash)
-
-	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "user exists"})
+	if err := h.service.Register(c, req.Email, req.Password); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -51,19 +44,11 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	var id, hash string
-
-	err := h.DB.QueryRow(c,
-		`SELECT id, password_hash FROM users WHERE email=$1`,
-		req.Email,
-	).Scan(&id, &hash)
-
-	if err != nil || auth.CheckPassword(hash, req.Password) != nil {
+	token, err := h.service.Login(c, req.Email, req.Password)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
-
-	token, _ := auth.GenerateToken(id, h.JWTSecret)
 
 	c.JSON(http.StatusOK, gin.H{"token": token})
 }
@@ -71,11 +56,11 @@ func (h *Handler) Login(c *gin.Context) {
 func (h *Handler) Me(c *gin.Context) {
 	userID := c.GetString("userID")
 
-	var email string
-	h.DB.QueryRow(c,
-		`SELECT email FROM users WHERE id=$1`,
-		userID,
-	).Scan(&email)
+	user, err := h.service.Me(c, userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
 
-	c.JSON(http.StatusOK, User{ID: userID, Email: email})
+	c.JSON(http.StatusOK, user)
 }

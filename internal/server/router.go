@@ -21,21 +21,16 @@ func NewRouter(db *pgxpool.Pool, jwtSecret string) *gin.Engine {
 	r.GET("/health", health.Handler(db))
 
 	// User handler
-	userHandler := &users.Handler{
-		DB:        db,
-		JWTSecret: jwtSecret,
-	}
+	userRepo := users.NewRepository(db)
+	userService := users.NewService(userRepo, jwtSecret)
+	userHandler := users.NewHandler(userService)
 
-	// Public auth routes
 	r.POST("/users", userHandler.Register)
 	r.POST("/login", userHandler.Login)
-
 	// Protected routes
-	authGroup := r.Group("/")
-	authGroup.Use(auth.Middleware(jwtSecret))
-	{
-		authGroup.GET("/me", userHandler.Me)
-	}
+	protected := r.Group("/")
+	protected.Use(auth.Middleware(jwtSecret))
+	protected.GET("/me", userHandler.Me)
 
 	return r
 }
